@@ -1,0 +1,3 @@
+[submodule "bpf_cubic/ebpf/libbpf"]
+	path = bpf_cubic/ebpf/libbpf
+	url = git@github.com:libbpf/libbpf.git
