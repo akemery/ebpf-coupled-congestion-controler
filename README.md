@@ -8,6 +8,7 @@ The aim of this project is to be able to couple congestion controllers  of sever
 
 ```
 git clone git@github.com:akemery/ebpf-coupled-congestion-controler.git
+cd ebpf-coupled-congestion-controler
 git submodule init && git submodule update
 ```
 
@@ -18,6 +19,23 @@ To build the eBPF code execute the following commands.
 ```
 cd bpf_cubic && ./configure && make
 ```
+
+#### Buggs
+
+If you have the following errors when building the eBPF code:
+
+```
+../.output/bpf/btf.h:426:24: error: use of undeclared identifier 'BTF_KIND_FLOAT'
+        return btf_kind(t) == BTF_KIND_FLOAT;
+                              ^
+../.output/bpf/btf.h:431:24: error: use of undeclared identifier 'BTF_KIND_TAG'
+        return btf_kind(t) == BTF_KIND_TAG;
+                              ^
+
+```
+
+Just open the file bpf_cubic/btf in an editor and copy lines 23 and 24 to the file ../.output/bpf/btf.h. 
+That will fix the error message.
 
 #### Try with an exemple client and server
 
@@ -39,6 +57,7 @@ You could try it by running the minimal client and server example in client_serv
 
 ```
 cd ../client_server_example
+make
 sudo ./server -s localhost -p 1234 -P 5678 -S send_log_file_path -R recv_log_file_path
 ```
 The server calls load_bpf_cubic(void) to set bpf_cubic as default congestion controller. When the transfer ends
