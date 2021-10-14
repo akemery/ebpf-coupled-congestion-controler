@@ -29,3 +29,29 @@ The eBPF code expose to the application an API with the following function:
 * void unload_bpf_cubic(void); to unload the eBPF cubic congestion controller.
 
 * New functions will come soon to control the behavior of the congestion controller. 
+
+You could try it by running the minimal client and server example in client_server_example folder.
+
+
+##### start the server
+
+ 
+
+```
+cd ../client_server_example
+sudo ./server -s localhost -p 1234 -P 5678 -S send_log_file_path -R recv_log_file_path
+```
+The server calls load_bpf_cubic(void) to set bpf_cubic as default congestion controller. When the transfer ends
+it calls  unload_bpf_cubic(void) to unload bpf_cubic.
+
+##### start the client
+
+The client does nothing because the test is done in the same host. Otherwise, the client will do the same.
+
+In another terminal run the following command:
+
+```
+./client -s localhost -p 1234 -P 5678 -S ../send_log_file_path -R ../recv_log_file_path -i <src_file> -o <dst_file> -f
+```
+
+The client does nothing because the test is done in the same host. Otherwise, the client will do the same.
