@@ -74,3 +74,9 @@ In another terminal run the following command:
 ```
 
 The client does nothing because the test is done in the same host. Otherwise, the client will do the same.
+
+#### Ploting graph
+
+```
+python3 plot-bpf-cc-goodput.py client_log_simple.log client_log_simple.log  client_log_simple.log cubic vegas_bpf_cubic 100 60
+```
