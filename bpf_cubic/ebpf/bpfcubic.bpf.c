@@ -73,6 +73,11 @@ static int hystart_low_window = 16;
 static int hystart_ack_delta_us = 2000;
 static int hystart_detect = HYSTART_ACK_TRAIN | HYSTART_DELAY;
 
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 256 * 1024);
+} rb SEC(".maps");
+
 static __always_inline __u64 div64_u64(__u64 dividend, __u64 divisor)
 {
 	return dividend / divisor;
@@ -108,12 +113,11 @@ static __always_inline int fls64(__u64 x)
 		num -= 2;
 		x<<= 2;
 	}
-	if (!(x & (~0ull << (BITS_PER_U64-1))))
-		num -= 1;
+	//if (!(x & (~0ull << (BITS_PER_U64-1))))
+	//	num -= 1;
 
 	return num + 1;
 }
-
 
 static const __u32 cube_rtt_scale = (bic_scale * 10);	/* 1024*c/rtt */
 __u32 beta_scale;  /*= 8*(BICTCP_BETA_SCALE+beta) / 3
@@ -140,16 +144,12 @@ static __always_inline struct tcp_sock *tcp_sk(const struct sock *sk)
 	return (struct tcp_sock *)sk;
 }
 
-
 static __always_inline __u32 bictcp_clock_us(const struct sock *sk)
 {
 	return tcp_sk(sk)->tcp_mstamp;
 }
 
-
 #define GSO_MAX_SIZE		65536
-
-
 
 static __always_inline struct inet_connection_sock *inet_csk(const struct sock *sk)
 {
@@ -228,6 +228,22 @@ static __always_inline void bictcp_hystart_reset(struct sock *sk)
 	ca->sample_cnt = 0;
 }
 
+static __always_inline void bictcp_to_event(struct event* e, struct bictcp* ca){
+	BPF_CORE_READ_INTO(&e->bictcp.ack_cnt, ca , ack_cnt);
+	BPF_CORE_READ_INTO(&e->bictcp.cnt, ca , cnt);
+	BPF_CORE_READ_INTO(&e->bictcp.last_cwnd, ca , last_cwnd);
+	BPF_CORE_READ_INTO(&e->bictcp.last_time, ca , last_time);
+	BPF_CORE_READ_INTO(&e->bictcp.bic_origin_point, ca , bic_origin_point);
+	BPF_CORE_READ_INTO(&e->bictcp.bic_K, ca , bic_K);
+	BPF_CORE_READ_INTO(&e->bictcp.delay_min, ca , delay_min);
+	BPF_CORE_READ_INTO(&e->bictcp.epoch_start, ca , epoch_start);
+	BPF_CORE_READ_INTO(&e->bictcp.tcp_cwnd, ca , tcp_cwnd);
+	BPF_CORE_READ_INTO(&e->bictcp.sample_cnt, ca , sample_cnt);
+	BPF_CORE_READ_INTO(&e->bictcp.round_start, ca , round_start);
+	BPF_CORE_READ_INTO(&e->bictcp.end_seq, ca , end_seq);
+	BPF_CORE_READ_INTO(&e->bictcp.last_ack, ca , last_ack);
+	BPF_CORE_READ_INTO(&e->bictcp.curr_rtt, ca , curr_rtt);
+}
 /*
  * cbrt(x) MSB values for x MSB values in [0..63].
  * Precomputed then refined by hand - Willy Tarreau
@@ -431,6 +447,12 @@ void BPF_PROG(bictcp_cwnd_event, struct sock *sk, enum tcp_ca_event event)
 
 		delta = now - tcp_sk(sk)->lsndtime;
 
+		struct event* e;
+		e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+		if(!e)
+			return;
+		e->type = BICTCP_CWND_EVENT;
+		bictcp_to_event(e,ca);
 		/* We were application limited (idle) for a while.
 		 * Shift epoch_start to keep cwnd growth to cubic curve.
 		 */
@@ -449,6 +471,10 @@ void BPF_STRUCT_OPS(bictcp_cong_avoid, struct sock *sk, __u32 ack, __u32 acked)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bictcp *ca = inet_csk_ca(sk);
 
+	struct event* e;
+	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	if(!e)
+		return;
 	if (!tcp_is_cwnd_limited(sk))
 		return;
 
@@ -459,8 +485,11 @@ void BPF_STRUCT_OPS(bictcp_cong_avoid, struct sock *sk, __u32 ack, __u32 acked)
 		if (!acked)
 			return;
 	}
+	e->type = BICTCP_CONG_AVOID;
+	bictcp_to_event(e,ca);
 	bictcp_update(ca, tp->snd_cwnd, acked);
 	tcp_cong_avoid_ai(tp, ca->cnt, acked);
+	bpf_ringbuf_submit(e,0);
 }
 
 
@@ -576,6 +605,12 @@ void BPF_PROG(bictcp_acked, struct sock *sk,
 	struct bictcp *ca = inet_csk_ca(sk);
 	__u32 delay;
 
+	struct event* e = bpf_ringbuf_reserve(&rb, sizeof(struct event), 0);
+	if(!e)
+		return;
+	
+	e->type = BICTCP_ACKED;
+	bictcp_to_event(e,ca);
 	/* Some calls are for duplicates without timetamps */
 	if (sample->rtt_us < 0)
 		return;
